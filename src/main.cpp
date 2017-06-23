@@ -34,9 +34,11 @@ string hasData(string s) {
 
 // Evaluate a polynomial.
 double polyeval(Eigen::VectorXd coeffs, double x) {
-  double result = 0.0;
-  for (int i = 0; i < coeffs.size(); i++) {
-    result += coeffs[i] * pow(x, i);
+  int n = coeffs.size();
+  double result = coeffs[n-1];
+  for (int i = n-2; i >= 0; i--) {
+    result *= x; 
+    result += coeffs[i];
   }
   return result;
 }
