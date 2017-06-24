@@ -100,8 +100,18 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+
+          Eigen::VectorXd xvals = Eigen::Map<Eigen::VectorXd>(ptsx.data(), ptsx.size());
+          Eigen::VectorXd yvals = Eigen::Map<Eigen::VectorXd>(ptsy.data(), ptsy.size());
+          Eigen::VectorXd coeffs = polyfit(xvals, yvals, 3);
+
+          Eigen::VectorXd state(4);
+          state << px, py, psi, v;
+
+          vector<double> actuators = mpc.Solve(state, coeffs);
+
+          double steer_value = -actuators[0];
+          double throttle_value = actuators[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
