@@ -2,13 +2,14 @@
 #include <cppad/cppad.hpp>
 #include <cppad/ipopt/solve.hpp>
 #include "Eigen-3.3/Eigen/Core"
+#include <fstream>
 
 using CppAD::AD;
 using namespace std;
 
 // TODO: Set the timestep length and duration
-size_t N = 10;
-double dt = 0.16;
+// size_t N = 40;
+// double dt = 0.05;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -26,22 +27,23 @@ const double Lf = 2.67;
 #define N_ERRORS 2
 #define N_ACTUATORS 2
 
+size_t N = 40;
 
-int x_start     = 0;
-int y_start     = x_start + N;
-int psi_start   = y_start + N;
-int v_start     = psi_start + N;
-int cte_start   = v_start + N;
-int epsi_start  = cte_start + N;
-int delta_start = epsi_start + N;
-int a_start     = delta_start + N - 1;
+size_t x_start     = 0;
+size_t y_start     = x_start + N;
+size_t psi_start   = y_start + N;
+size_t v_start     = psi_start + N;
+size_t cte_start   = v_start + N;
+size_t epsi_start  = cte_start + N;
+size_t delta_start = epsi_start + N;
+size_t a_start     = delta_start + N - 1;
 
 // Evaluate a polynomial.
 template<typename T> 
-T polyeval(Eigen::VectorXd coeffs, T x) {
+T polyeval(const Eigen::VectorXd &coeffs, const T &x) {
   size_t n = coeffs.size();
   T result = coeffs[n-1];
-  for (size_t i = n-2; i >= 0; i--) {
+  for (int i = n-2; i >= 0; i--) {
     result *= x; 
     result += coeffs[i];
   }
@@ -64,9 +66,18 @@ class FG_eval {
   // Fitted polynomial coefficients
   Eigen::VectorXd coeffs;
   Eigen::VectorXd coeffs_grad;
-  FG_eval(Eigen::VectorXd coeffs) { 
+  Eigen::VectorXd coeffs_hess;
+
+  double dt;
+
+  vector<double> lambda;
+
+  FG_eval(const Eigen::VectorXd &coeffs, const vector<double> &lambda, double dt) { 
     this->coeffs = coeffs; 
+    this->lambda = lambda;
+    this->dt = dt;
     coeffs_grad = differentiate(coeffs);
+    coeffs_hess = differentiate(coeffs_grad);
   }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
@@ -78,8 +89,31 @@ class FG_eval {
 
     // cost
     for(size_t t=0; t<N; t++){
-      fg[0] += CppAD::pow(vars[cte_start+t],2);
-      fg[0] += CppAD::pow(vars[epsi_start+t],2);
+      fg[0] += lambda[0]*CppAD::pow(vars[cte_start+t],2);
+      fg[0] += lambda[1]*CppAD::pow(vars[epsi_start+t],2);
+
+
+      AD<double> x0 = vars[x_start];
+      AD<double> curvature = polyeval(coeffs_hess, x0)
+                            /CppAD::pow(1+CppAD::pow(polyeval(coeffs_grad,x0),2),1.5);
+
+      AD<double> ref_v = 10+(lambda[7]-10)/(1+50*CppAD::abs(curvature));
+
+      fg[0] += lambda[2]*CppAD::pow(vars[v_start+t] - ref_v,2);
+      // fg[0] -= lambda[2]*(CppAD::pow(vars[x_start]-vars[y_start-1],2)
+      //                     + CppAD::pow(vars[y_start]-vars[psi_start-1],2));
+    }
+
+    // Minimize the use of actuators.
+    for (size_t t = 0; t < N - 1; t++) {
+      fg[0] += lambda[3]*CppAD::pow(vars[delta_start + t], 2);
+      fg[0] += lambda[4]*CppAD::pow(vars[a_start + t], 2);
+    }
+
+    // Minimize the value gap between sequential actuations.
+    for (size_t t = 0; t < N - 2; t++) {
+      fg[0] += lambda[5]*CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += lambda[6]*CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
     }
 
     // initialization
@@ -89,41 +123,43 @@ class FG_eval {
     fg[1+v_start]     = vars[v_start];
     fg[1+cte_start]   = vars[cte_start];
     fg[1+epsi_start]  = vars[epsi_start];
-
-    // constraints (special)
-    fg[1+cte_start]   = vars[cte_start] - (polyeval(coeffs, vars[x_start]) - vars[y_start]);
-    fg[1+epsi_start]  = vars[epsi_start] - (vars[psi_start] - CppAD::atan(polyeval(coeffs_grad, vars[x_start])));
+    fg[1+cte_start]   = vars[cte_start];
+    fg[1+epsi_start]  = vars[epsi_start];
 
     // constraints
     for(size_t t=1; t<N; t++){
-      AD<double> x0   = vars[x_start+t-1];
-      AD<double> y0   = vars[y_start+t-1];
-      AD<double> v0   = vars[v_start+t-1];
-      AD<double> psi0 = vars[psi_start+t-1];
+      AD<double> x0     = vars[x_start+t-1];
+      AD<double> y0     = vars[y_start+t-1];
+      AD<double> v0     = vars[v_start+t-1];
+      AD<double> psi0   = vars[psi_start+t-1];
       AD<double> delta0 = vars[delta_start+t-1];
-      AD<double> a0   = vars[a_start+t-1];
+      AD<double> a0     = vars[a_start+t-1];
 
-      fg[1+x_start+t]   = vars[x_start+t] - (x0 + v0*CppAD::cos(psi0)*dt);
-      fg[1+y_start+t]   = vars[y_start+t] - (y0 + v0*CppAD::sin(psi0)*dt);
+      fg[1+x_start+t]   = vars[x_start+t]   - (x0 + v0*CppAD::cos(psi0)*dt);
+      fg[1+y_start+t]   = vars[y_start+t]   - (y0 + v0*CppAD::sin(psi0)*dt);
       fg[1+psi_start+t] = vars[psi_start+t] - (psi0 + v0/Lf*delta0*dt);
-      fg[1+v_start+t]   = vars[v_start+t] - (v0 + a0*dt);
-
+      fg[1+v_start+t]   = vars[v_start+t]   - (v0 + a0*dt);
       fg[1+cte_start+t] = vars[cte_start+t] - (polyeval(coeffs,x0) - y0 + v0*CppAD::sin(vars[epsi_start+t-1])*dt);
       fg[1+epsi_start+t] = vars[epsi_start+t] - (vars[psi_start+t] - CppAD::atan(polyeval(coeffs_grad,x0)));
     }
-
   }
 };
 
 //
 // MPC class definition implementation.
 //
-MPC::MPC() {}
+MPC::MPC(): lambda(8) {
+  std::ifstream ifs ("lambda.txt", std::ifstream::in);
+  for(int i =0; i<8; i++){
+    ifs>>lambda[i];
+  }
+}
+
 MPC::~MPC() {}
 
 vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   bool ok = true;
-  size_t i;
+  // size_t i;
   typedef CPPAD_TESTVECTOR(double) Dvector;
 
   // TODO: Set the number of model variables (includes both states and inputs).
@@ -147,29 +183,29 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   Dvector vars_upperbound(n_vars);
   // TODO: Set lower and upper limits for variables.
 
-  for(size_t t=0; t<N; i++){
-    vars_lowerbound[x_start + t] = -1e3;
-    vars_upperbound[x_start + t] = 1e3;
+  for(size_t t=0; t<N; t++){
+    vars_lowerbound[x_start + t] = -1e19;
+    vars_upperbound[x_start + t] = 1e19;
 
-    vars_lowerbound[y_start + t] = -1e3;
-    vars_upperbound[y_start + t] = 1e3;
+    vars_lowerbound[y_start + t] = -1e19;
+    vars_upperbound[y_start + t] = 1e19;
 
-    vars_lowerbound[psi_start + t] = -5;
-    vars_upperbound[psi_start + t] = 5;    
+    vars_lowerbound[psi_start + t] = -1e19;
+    vars_upperbound[psi_start + t] = 1e19;    
 
     vars_lowerbound[v_start + t] = 0;
-    vars_upperbound[v_start + t] = 100;
+    vars_upperbound[v_start + t] = 1e19;
 
-    vars_lowerbound[cte_start + t] = -5;
-    vars_upperbound[cte_start + t] = 5;
+    vars_lowerbound[cte_start + t] = -1e19;
+    vars_upperbound[cte_start + t] = 1e19;
 
-    vars_lowerbound[epsi_start + t] = -5;
-    vars_upperbound[epsi_start + t] = 5;
+    vars_lowerbound[epsi_start + t] = -1e19;
+    vars_upperbound[epsi_start + t] = 1e19;
   }
 
   for(size_t t=0; t<N-1; t++){
-    vars_lowerbound[delta_start + t] = -0.6;
-    vars_upperbound[delta_start + t] = 0.6;    
+    vars_lowerbound[delta_start + t] = -0.436332;
+    vars_upperbound[delta_start + t] = 0.436332;    
 
     vars_lowerbound[a_start + t] = -1;
     vars_upperbound[a_start + t] = 1;
@@ -180,15 +216,21 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   Dvector constraints_lowerbound(n_constraints);
   Dvector constraints_upperbound(n_constraints);
   for (size_t i = 0; i < n_constraints; i++) {
-    constraints_lowerbound[i] = 0;
-    constraints_upperbound[i] = 0;
+    constraints_lowerbound[i] = constraints_upperbound[i] = 0;
   }
 
   double x0 = state[0], y0 = state[1], psi0 = state[2], v0 = state[3];
+
+  Eigen::VectorXd grad = differentiate(coeffs);
+  Eigen::VectorXd hess = differentiate(grad);
+  double curvature = polyeval(hess, x0)/pow(1+pow(polyeval(grad,x0),2),1.5);
+
+  cout<<"curvature = "<<curvature<<endl;
+
   double cte0 = polyeval(coeffs, x0) - y0;
   double epsi0 = psi0 - atan(polyeval(differentiate(coeffs), x0));
 
-  cout<<"here"<<endl;
+
   constraints_lowerbound[x_start]   = constraints_upperbound[x_start]   = x0;
   constraints_lowerbound[y_start]   = constraints_upperbound[y_start]   = y0;
   constraints_lowerbound[psi_start] = constraints_upperbound[psi_start] = psi0;
@@ -197,7 +239,11 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   constraints_lowerbound[epsi_start] = constraints_upperbound[epsi_start] = epsi0;
 
   // object that computes objective and constraints
-  FG_eval fg_eval(coeffs);
+  double dt = 70.0/v0/N;
+  if(dt > 0.15) dt = 0.15;
+  if(dt < 0.03) dt = 0.03;
+
+  FG_eval fg_eval(coeffs, lambda, dt);
 
   //
   // NOTE: You don't have to worry about these options
@@ -237,5 +283,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   //
   // {...} is shorthand for creating a vector, so auto x1 = {1.0,2.0}
   // creates a 2 element double vector.
-  return {solution.x[delta_start], solution.x[a_start]};
+
+  vector<double> sol(n_vars);
+  for(size_t i=0; i<n_vars; i++) sol[i] = solution.x[i];
+  return sol;
 }

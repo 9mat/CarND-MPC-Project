@@ -46,7 +46,7 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
+Eigen::VectorXd polyfit(const Eigen::VectorXd &xvals, const Eigen::VectorXd &yvals,
                         int order) {
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
@@ -67,7 +67,82 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
+void test(){
+  string sdata = "42[\"telemetry\",{\"ptsx\":[-32.16173,-43.49173,-61.09,-78.29172,-93.05002,-107.7717],\"ptsy\":[113.361,105.941,92.88499,78.73102,65.34102,50.57938],\"psi_unity\":4.120315,\"psi\":3.733667,\"x\":-40.62008,\"y\":108.7301,\"steering_angle\":0,\"throttle\":0,\"speed\":20}]";
+  string s = hasData(sdata);
+  auto j = json::parse(s);
+  vector<double> ptsx = j[1]["ptsx"];
+  vector<double> ptsy = j[1]["ptsy"];
+  double px = j[1]["x"];
+  double py = j[1]["y"];
+  double psi = j[1]["psi"];
+  double v = j[1]["speed"];
+
+  v *= 0.44704;
+
+  /*
+  * TODO: Calculate steering angle and throttle using MPC.
+  *
+  * Both are in between [-1, 1].
+  *
+  */
+
+  // int N = ptsx.size();
+
+  Eigen::VectorXd xvals = Eigen::Map<Eigen::VectorXd>(ptsx.data(), ptsx.size());
+  Eigen::VectorXd yvals = Eigen::Map<Eigen::VectorXd>(ptsy.data(), ptsy.size());
+  Eigen::VectorXd coeffs = polyfit(xvals, yvals, 3);
+
+  Eigen::VectorXd state(4);
+  state << px, py, psi, v;
+
+  MPC mpc;
+
+  vector<double> sol = mpc.Solve(state, coeffs);
+
+  size_t nn = 25;
+  int x_start     = 0;
+  int y_start     = x_start + nn;
+  int psi_start   = y_start + nn;
+  int v_start     = psi_start + nn;
+  int cte_start   = v_start + nn;
+  int epsi_start  = cte_start + nn;
+  int delta_start = epsi_start + nn;
+  int a_start     = delta_start + nn - 1;
+
+  double steer_value = -sol[delta_start];
+  double throttle_value = sol[a_start];
+  cout<<"steer "<<steer_value<<", throttle "<<throttle_value<<endl;
+
+  cout<<"velocity: ";
+  for(size_t t=0; t<nn; t++) cout<<sol[v_start+t]<<", "; cout<<endl;
+
+
+  cout<<"x: ";
+  for(size_t t=0; t<nn; t++) cout<<sol[x_start+t]<<", "; cout<<endl;
+
+  cout<<"y: ";
+  for(size_t t=0; t<nn; t++) cout<<sol[y_start+t]<<", "; cout<<endl;
+
+  cout<<"cte: ";
+  for(size_t t=0; t<nn; t++) cout<<sol[cte_start+t]<<", "; cout<<endl;
+
+  cout<<"psi: ";
+  for(size_t t=0; t<nn; t++) cout<<sol[psi_start+t]<<", "; cout<<endl;
+
+  cout<<"epsi: ";
+  for(size_t t=0; t<nn; t++) cout<<sol[epsi_start+t]<<", "; cout<<endl;
+
+  cout<<"steer: ";
+  for(size_t t=0; t<nn-1; t++) cout<<sol[delta_start+t]<<", "; cout<<endl;
+
+  cout<<"throttle: ";
+  for(size_t t=0; t<nn-1; t++) cout<<sol[a_start+t]<<", "; cout<<endl;
+}
+
 int main() {
+  // test();
+  // return 0;
   uWS::Hub h;
 
   // MPC is initialized here!
@@ -93,6 +168,7 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          v *= 0.44704;
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -101,27 +177,57 @@ int main() {
           *
           */
 
-          Eigen::VectorXd xvals = Eigen::Map<Eigen::VectorXd>(ptsx.data(), ptsx.size());
-          Eigen::VectorXd yvals = Eigen::Map<Eigen::VectorXd>(ptsy.data(), ptsy.size());
+          int n_pts = ptsx.size();
+
+          Eigen::VectorXd xvals(n_pts), yvals(n_pts);
+
+          for(int i=0; i<n_pts; i++){
+            double x = ptsx[i] - px, y = ptsy[i] - py;
+            xvals[i] = x*cos(-psi) - y*sin(-psi);
+            yvals[i] = x*sin(-psi) + y*cos(-psi);
+          }
+
           Eigen::VectorXd coeffs = polyfit(xvals, yvals, 3);
 
           Eigen::VectorXd state(4);
-          state << px, py, psi, v;
+          state << 0, 0, 0, v;
 
-          vector<double> actuators = mpc.Solve(state, coeffs);
+          vector<double> sol = mpc.Solve(state, coeffs);
 
-          double steer_value = -actuators[0];
-          double throttle_value = actuators[1];
+          size_t N = 40;
+          int x_start     = 0;
+          int y_start     = x_start + N;
+          int psi_start   = y_start + N;
+          int v_start     = psi_start + N;
+          int cte_start   = v_start + N;
+          int epsi_start  = cte_start + N;
+          int delta_start = epsi_start + N;
+          int a_start     = delta_start + N - 1;
+
+          double steer_value = -sol[delta_start];
+          double throttle_value = sol[a_start];
+
+          cout<<"steer "<<steer_value<<", throttle "<<throttle_value<<endl;
+
+          cout<<"velocity: ";
+          for(size_t t=0; t<N; t++) cout<<sol[v_start+t]<<", "; cout<<endl;
+
+          cout<<"cte: ";
+          for(size_t t=0; t<N; t++) cout<<sol[cte_start+t]<<", "; cout<<endl;
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = steer_value/deg2rad(25);
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          vector<double> mpc_x_vals(N);
+          vector<double> mpc_y_vals(N);
+          for(size_t t=0; t < N; t++) {
+            mpc_x_vals[t] = sol[x_start+t];
+            mpc_y_vals[t] = sol[y_start+t];
+          }
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -130,18 +236,22 @@ int main() {
           msgJson["mpc_y"] = mpc_y_vals;
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+          vector<double> next_x_vals(n_pts);
+          vector<double> next_y_vals(n_pts);
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
 
+          for(int t=0; t < n_pts; t++) {
+            next_x_vals[t] = xvals[t];
+            next_y_vals[t] = yvals[t];
+          }
+
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
-
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          // std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
@@ -151,7 +261,8 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          this_thread::sleep_for(chrono::milliseconds(100));
+          // this_thread::sleep_for(chrono::milliseconds(100));
+          this_thread::sleep_for(chrono::milliseconds(0));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
