@@ -27,7 +27,7 @@ const double Lf = 2.67;
 #define N_ERRORS 2
 #define N_ACTUATORS 2
 
-size_t N = 40;
+size_t N = 15;
 
 size_t x_start     = 0;
 size_t y_start     = x_start + N;
@@ -92,12 +92,11 @@ class FG_eval {
       fg[0] += lambda[0]*CppAD::pow(vars[cte_start+t],2);
       fg[0] += lambda[1]*CppAD::pow(vars[epsi_start+t],2);
 
-
       AD<double> x0 = vars[x_start];
       AD<double> curvature = polyeval(coeffs_hess, x0)
                             /CppAD::pow(1+CppAD::pow(polyeval(coeffs_grad,x0),2),1.5);
 
-      AD<double> ref_v = 10+(lambda[7]-10)/(1+50*CppAD::abs(curvature));
+      AD<double> ref_v = 20+(lambda[7]-20)/(1+80*CppAD::abs(curvature));
 
       fg[0] += lambda[2]*CppAD::pow(vars[v_start+t] - ref_v,2);
       // fg[0] -= lambda[2]*(CppAD::pow(vars[x_start]-vars[y_start-1],2)
@@ -159,7 +158,7 @@ MPC::~MPC() {}
 
 vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   bool ok = true;
-  // size_t i;
+
   typedef CPPAD_TESTVECTOR(double) Dvector;
 
   // TODO: Set the number of model variables (includes both states and inputs).
@@ -225,11 +224,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   Eigen::VectorXd hess = differentiate(grad);
   double curvature = polyeval(hess, x0)/pow(1+pow(polyeval(grad,x0),2),1.5);
 
-  cout<<"curvature = "<<curvature<<endl;
-
   double cte0 = polyeval(coeffs, x0) - y0;
   double epsi0 = psi0 - atan(polyeval(differentiate(coeffs), x0));
-
 
   constraints_lowerbound[x_start]   = constraints_upperbound[x_start]   = x0;
   constraints_lowerbound[y_start]   = constraints_upperbound[y_start]   = y0;
@@ -239,11 +235,11 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   constraints_lowerbound[epsi_start] = constraints_upperbound[epsi_start] = epsi0;
 
   // object that computes objective and constraints
-  double dt = 70.0/v0/N;
-  if(dt > 0.15) dt = 0.15;
-  if(dt < 0.03) dt = 0.03;
+  // double dt = 70.0/v0/N;
+  // if(dt > 0.15) dt = 0.15;
+  // if(dt < 0.03) dt = 0.03;
 
-  FG_eval fg_eval(coeffs, lambda, dt);
+  FG_eval fg_eval(coeffs, lambda, 0.1);
 
   //
   // NOTE: You don't have to worry about these options
@@ -276,7 +272,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
 
   // Cost
   auto cost = solution.obj_value;
-  std::cout << "Cost " << cost << std::endl;
+  // std::cout << "Cost " << cost << std::endl;
 
   // TODO: Return the first actuator values. The variables can be accessed with
   // `solution.x[i]`.

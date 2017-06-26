@@ -67,94 +67,21 @@ Eigen::VectorXd polyfit(const Eigen::VectorXd &xvals, const Eigen::VectorXd &yva
   return result;
 }
 
-void test(){
-  string sdata = "42[\"telemetry\",{\"ptsx\":[-32.16173,-43.49173,-61.09,-78.29172,-93.05002,-107.7717],\"ptsy\":[113.361,105.941,92.88499,78.73102,65.34102,50.57938],\"psi_unity\":4.120315,\"psi\":3.733667,\"x\":-40.62008,\"y\":108.7301,\"steering_angle\":0,\"throttle\":0,\"speed\":20}]";
-  string s = hasData(sdata);
-  auto j = json::parse(s);
-  vector<double> ptsx = j[1]["ptsx"];
-  vector<double> ptsy = j[1]["ptsy"];
-  double px = j[1]["x"];
-  double py = j[1]["y"];
-  double psi = j[1]["psi"];
-  double v = j[1]["speed"];
-
-  v *= 0.44704;
-
-  /*
-  * TODO: Calculate steering angle and throttle using MPC.
-  *
-  * Both are in between [-1, 1].
-  *
-  */
-
-  // int N = ptsx.size();
-
-  Eigen::VectorXd xvals = Eigen::Map<Eigen::VectorXd>(ptsx.data(), ptsx.size());
-  Eigen::VectorXd yvals = Eigen::Map<Eigen::VectorXd>(ptsy.data(), ptsy.size());
-  Eigen::VectorXd coeffs = polyfit(xvals, yvals, 3);
-
-  Eigen::VectorXd state(4);
-  state << px, py, psi, v;
-
-  MPC mpc;
-
-  vector<double> sol = mpc.Solve(state, coeffs);
-
-  size_t nn = 25;
-  int x_start     = 0;
-  int y_start     = x_start + nn;
-  int psi_start   = y_start + nn;
-  int v_start     = psi_start + nn;
-  int cte_start   = v_start + nn;
-  int epsi_start  = cte_start + nn;
-  int delta_start = epsi_start + nn;
-  int a_start     = delta_start + nn - 1;
-
-  double steer_value = -sol[delta_start];
-  double throttle_value = sol[a_start];
-  cout<<"steer "<<steer_value<<", throttle "<<throttle_value<<endl;
-
-  cout<<"velocity: ";
-  for(size_t t=0; t<nn; t++) cout<<sol[v_start+t]<<", "; cout<<endl;
-
-
-  cout<<"x: ";
-  for(size_t t=0; t<nn; t++) cout<<sol[x_start+t]<<", "; cout<<endl;
-
-  cout<<"y: ";
-  for(size_t t=0; t<nn; t++) cout<<sol[y_start+t]<<", "; cout<<endl;
-
-  cout<<"cte: ";
-  for(size_t t=0; t<nn; t++) cout<<sol[cte_start+t]<<", "; cout<<endl;
-
-  cout<<"psi: ";
-  for(size_t t=0; t<nn; t++) cout<<sol[psi_start+t]<<", "; cout<<endl;
-
-  cout<<"epsi: ";
-  for(size_t t=0; t<nn; t++) cout<<sol[epsi_start+t]<<", "; cout<<endl;
-
-  cout<<"steer: ";
-  for(size_t t=0; t<nn-1; t++) cout<<sol[delta_start+t]<<", "; cout<<endl;
-
-  cout<<"throttle: ";
-  for(size_t t=0; t<nn-1; t++) cout<<sol[a_start+t]<<", "; cout<<endl;
-}
-
 int main() {
-  // test();
-  // return 0;
   uWS::Hub h;
 
   // MPC is initialized here!
   MPC mpc;
 
-  h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  double last_x, last_y;
+
+  h.onMessage([&mpc, &last_x, &last_y](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -168,6 +95,12 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+
+          // time from last control
+          double dt = sqrt(pow(px-last_x,2) + pow(py-last_y,2))/v;
+          last_x = px, last_y = py;
+
+          // convert mph to m/s
           v *= 0.44704;
 
           /*
@@ -177,24 +110,39 @@ int main() {
           *
           */
 
+
           int n_pts = ptsx.size();
 
           Eigen::VectorXd xvals(n_pts), yvals(n_pts);
 
+          // transform from global coord to vehicle coord
           for(int i=0; i<n_pts; i++){
             double x = ptsx[i] - px, y = ptsy[i] - py;
             xvals[i] = x*cos(-psi) - y*sin(-psi);
             yvals[i] = x*sin(-psi) + y*cos(-psi);
           }
 
+          // fitted polynomial
           Eigen::VectorXd coeffs = polyfit(xvals, yvals, 3);
 
+          // current actuator values
+          double delta0  = j[1]["steering_angle"];
+          double a0      = j[1]["throttle"];
+
+          double latency = 0.25; // 100ms artificial + 150ms instrinsic
+
+          // states after latency
+          double x0 = v*latency;
+          double y0 = 0;
+          double psi0 = -v*delta0/2.67*latency;
+          double v0 = v + a0*latency;
+
           Eigen::VectorXd state(4);
-          state << 0, 0, 0, v;
+          state << x0, y0, psi0, v0;
 
           vector<double> sol = mpc.Solve(state, coeffs);
 
-          size_t N = 40;
+          size_t N = 15;
           int x_start     = 0;
           int y_start     = x_start + N;
           int psi_start   = y_start + N;
@@ -207,13 +155,7 @@ int main() {
           double steer_value = -sol[delta_start];
           double throttle_value = sol[a_start];
 
-          cout<<"steer "<<steer_value<<", throttle "<<throttle_value<<endl;
-
-          cout<<"velocity: ";
-          for(size_t t=0; t<N; t++) cout<<sol[v_start+t]<<", "; cout<<endl;
-
-          cout<<"cte: ";
-          for(size_t t=0; t<N; t++) cout<<sol[cte_start+t]<<", "; cout<<endl;
+          printf("steer %6.4f, throttle %4.2f, dt %6.4f\n", steer_value, throttle_value, dt);
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -262,7 +204,7 @@ int main() {
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
           // this_thread::sleep_for(chrono::milliseconds(100));
-          this_thread::sleep_for(chrono::milliseconds(0));
+          this_thread::sleep_for(chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
