@@ -97,6 +97,7 @@ int main() {
           double v = j[1]["speed"];
 
           // time from last control
+          // this is to determine dt for MPC
           double dt = sqrt(pow(px-last_x,2) + pow(py-last_y,2))/v;
           last_x = px, last_y = py;
 
@@ -129,9 +130,13 @@ int main() {
           double delta0  = j[1]["steering_angle"];
           double a0      = j[1]["throttle"];
 
+          // In addition to the "artificial" latency of 100ms created below
+          // There seems to be an instrinsic latency of around 150 ms
+          // that is present in the simulator
           double latency = 0.25; // 100ms artificial + 150ms instrinsic
 
-          // states after latency
+          // states after transformation: (x,y) = 0, psi = 0, v = v
+          // calculate states after latency
           double x0 = v*latency;
           double y0 = 0;
           double psi0 = -v*delta0/2.67*latency;
@@ -140,9 +145,12 @@ int main() {
           Eigen::VectorXd state(4);
           state << x0, y0, psi0, v0;
 
+          // Call MPC to solve for optimal controls
           vector<double> sol = mpc.Solve(state, coeffs);
 
-          size_t N = 15;
+          size_t N = 20; // this has to match the N value in MPC.cpp
+                         // there should be better ways 
+                         // to manage hyper parameters like these
           int x_start     = 0;
           int y_start     = x_start + N;
           int psi_start   = y_start + N;
@@ -154,8 +162,12 @@ int main() {
 
           double steer_value = -sol[delta_start];
           double throttle_value = sol[a_start];
+          double curvature = sol[sol.size()-2];
+          double cost = sol.back();
 
-          printf("steer %6.4f, throttle %4.2f, dt %6.4f\n", steer_value, throttle_value, dt);
+          // report some relevant information
+          printf("steer %7.4f throttle %5.2f dt %7.4f curve %6.4f \ncost %7.4f speed %7.4f\n", 
+            steer_value, throttle_value, dt, curvature, cost, v);
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.

@@ -27,7 +27,8 @@ const double Lf = 2.67;
 #define N_ERRORS 2
 #define N_ACTUATORS 2
 
-size_t N = 15;
+size_t N = 20;
+double dt = 0.07;
 
 size_t x_start     = 0;
 size_t y_start     = x_start + N;
@@ -68,14 +69,11 @@ class FG_eval {
   Eigen::VectorXd coeffs_grad;
   Eigen::VectorXd coeffs_hess;
 
-  double dt;
-
   vector<double> lambda;
 
-  FG_eval(const Eigen::VectorXd &coeffs, const vector<double> &lambda, double dt) { 
+  FG_eval(const Eigen::VectorXd &coeffs, const vector<double> &lambda) { 
     this->coeffs = coeffs; 
     this->lambda = lambda;
-    this->dt = dt;
     coeffs_grad = differentiate(coeffs);
     coeffs_hess = differentiate(coeffs_grad);
   }
@@ -147,11 +145,17 @@ class FG_eval {
 //
 // MPC class definition implementation.
 //
-MPC::MPC(): lambda(8) {
-  std::ifstream ifs ("lambda.txt", std::ifstream::in);
-  for(int i =0; i<8; i++){
-    ifs>>lambda[i];
-  }
+MPC::MPC(): lambda(8, 1.0) {
+
+  // Read from file for ease of tuning
+  // std::ifstream ifs ("lambda.txt", std::ifstream::in);
+  // for(int i =0; i<8; i++){
+  //   ifs>>lambda[i];
+  // }
+
+  lambda[0] = 3; // cte squared
+  lambda[3] = 15000; // delta squared
+  lambda[7] = 55; // maximum reference speed
 }
 
 MPC::~MPC() {}
@@ -234,12 +238,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   constraints_lowerbound[cte_start] = constraints_upperbound[cte_start] = cte0;
   constraints_lowerbound[epsi_start] = constraints_upperbound[epsi_start] = epsi0;
 
-  // object that computes objective and constraints
-  // double dt = 70.0/v0/N;
-  // if(dt > 0.15) dt = 0.15;
-  // if(dt < 0.03) dt = 0.03;
 
-  FG_eval fg_eval(coeffs, lambda, 0.1);
+  FG_eval fg_eval(coeffs, lambda);
 
   //
   // NOTE: You don't have to worry about these options
@@ -281,6 +281,12 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // creates a 2 element double vector.
 
   vector<double> sol(n_vars);
-  for(size_t i=0; i<n_vars; i++) sol[i] = solution.x[i];
+  for(size_t i=0; i<n_vars; i++) {
+    sol[i] = solution.x[i];
+  }
+
+  sol.push_back(curvature);
+  sol.push_back(cost);
+
   return sol;
 }
