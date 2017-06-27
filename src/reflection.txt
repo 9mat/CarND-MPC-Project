@@ -33,3 +33,6 @@ which one generates best driving performance). So in total, I adjusted for 250ms
 
 To deal with latency, I simulate, using the kinetic model, the states of the vehicle after the duration
 of the latency, and use these states to be the initial states for the MPC.
+
+## Video output
+https://youtu.be/YsBD5sf2YX0
