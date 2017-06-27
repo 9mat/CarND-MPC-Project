@@ -1,3 +1,59 @@
+## Model
+6 states:
++ car x-coordinate x(t) 
++ car y-coordinate y(t)
++ car heading direction psi(t)
++ car speed v(t)
++ cross-track error cte(t)
++ directional error epsi(t)
+
+2 actuators
++ steering angle delta(t)
++ throttle (acceleration) a(t)
+
+Updating equations:
+(1) x(t+1)    = x(t) + v(t)*cos(psi(t))*dt
+(2) y(t+1)    = y(t) + v(t)*sin(psi(t))*dt
+(3) psi(t+1)  = psi(t) + v(t)/Lf*delta(t)*dt
+(4) v(t+1)    = v(t) + a(t)*dt
+(5) cte(t+1)  = f(x(t)) - y(t) + v(t)*sin(epsi(t))*dt
+(6) epsi(t+1) = psi(t) - atan(f'(x(t))) + v(t)*delta(t)/Lf*dt
+
+Since psi(t+1)  = psi(t) + v(t)/Lf*delta(t)*dt (equation (3)), I replace
+the last equation with the following equivalent constraint:
+(6') epsi(t+1) = psi(t+1) - atan(f'(x(t)))
+
+These 6 equations will act as the contraints in the optimization to solve for
+optimal values of the actuators.
+
+The cost to be minimized include:
+(a) sum of squared cross track errors: cte(t)^2, t=1..N
+(b) sum of squared directional errors: epsi(t)^2, t=1..N
+(c) sum of squared deviation from reference speed: (v(t) - ref_v(t))^2, t=1..N
+(d) sum of squared steering angles: delta(t)^2, t=1..N-1
+(e) sum of squared accelerations: a(t)^2, t=1..N-1
+(f) sum of squared change in steering angles: (delta(t+1)-delta(t))^2, t=1..N-2
+(g) sum of squared change in accelerations: (a(t+1)-a(t))^2, t=1..N-2
+
+(a) and (b) is to keep the car following the track
+(c) is to keep the car moving
+(e) and (f) is to reduce fluctuations of car around the track
+(f) and (g) is to maintain stability of the car when there is a sudden change in the
+track
+
+I allow the reference velocity to depend on the curvature of the track. 
+Specifically, as curvature increases, the referenced speed decreases.
+I will the following equation:
+
+(7) ref_v(t) = min_speed + (max_speed-min_speed)/(1 + b*curvature)
+
+As curvature increased from 0 to infinity, ref_v(t) decreases from max_speed to min_speed.
+The parameter b can be tuned to control how fast the speed reponds to curvature.
+I chose b so that the speed at the maximum curvature of track in the simulator (around 0.03)
+is around 50mph.
+
+
+
 ## Elapsed duration
 I chose dt to match the time between between 2 consective calls to onMessage() functions.
 Because I am not sure if the time of the simulator match the time of the computer,

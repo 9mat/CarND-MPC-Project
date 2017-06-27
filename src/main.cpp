@@ -67,6 +67,22 @@ Eigen::VectorXd polyfit(const Eigen::VectorXd &xvals, const Eigen::VectorXd &yva
   return result;
 }
 
+void transform(const vector<double> &ptsx, const vector<double> &ptsy, 
+              double px, double py, double psi,
+              Eigen::VectorXd &xvals, Eigen::VectorXd &yvals){
+  size_t n_pts = ptsx.size();
+
+  assert(ptsy.size() == n_pts);
+  assert(xvals.size() >= n_pts);
+  assert(yvals.size() >= n_pts);
+
+  for(size_t i=0; i<n_pts; i++){
+    double x = ptsx[i] - px, y = ptsy[i] - py;
+    xvals[i] = x*cos(-psi) - y*sin(-psi);
+    yvals[i] = x*sin(-psi) + y*cos(-psi);
+  }  
+}
+
 int main() {
   uWS::Hub h;
 
@@ -111,17 +127,12 @@ int main() {
           *
           */
 
-
           int n_pts = ptsx.size();
 
           Eigen::VectorXd xvals(n_pts), yvals(n_pts);
 
           // transform from global coord to vehicle coord
-          for(int i=0; i<n_pts; i++){
-            double x = ptsx[i] - px, y = ptsy[i] - py;
-            xvals[i] = x*cos(-psi) - y*sin(-psi);
-            yvals[i] = x*sin(-psi) + y*cos(-psi);
-          }
+          transform(ptsx, ptsy, px, py, psi, xvals, yvals);
 
           // fitted polynomial
           Eigen::VectorXd coeffs = polyfit(xvals, yvals, 3);
