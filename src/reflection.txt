@@ -1,0 +1,35 @@
+## Elapsed duration
+I chose dt to match the time between between 2 consective calls to onMessage() functions.
+Because I am not sure if the time of the simulator match the time of the computer,
+instead of using computer time to measure the duration, I use distance of travel divided by
+current speed, as both of them are measured by the simulator
+
+The elapsed time seems to depend on the computer. On my laptop it is about 120ms but on my
+desktop it is about 70ms. In the current code I chose 70ms a the elapsed duration
+
+
+## Timestep length
+The timestep length is chosen to be large to cover enough distance in the future so that the
+control has more information to optimize. However it should not be too far ahead for two reasons.
+First, the track is approximated, the further away, the less accurate the approximation is, leading
+to wrong optimization. Secondly, looking too far ahead put more weigh in optimizing future driving 
+instead of current driving, but the objective is to find the current actuators, and future actuators
+should be better handled by future optimization when more accurate information is available.
+
+When I tried large N (N = 50), MPC looks to far ahead and at times approximate the track inaccurately
+at furthest part, in other times, match the track too close at the further part at the cost of large cte
+in the closest portion of the track.
+
+WHen I tried small N (N=5 to 10), MPC does not have enough information, creating a lot swings when driving
+as the optimization change drastically from one step to the next.
+
+In the end I chose N to be around 20 to 30.
+
+
+## Latency
+In addtition to the "artificial" latency of 100ms that the code generated, there seems to be an inherent
+latency in the simulator with duration of around 150ms (I found this value by vary the latency and see 
+which one generates best driving performance). So in total, I adjusted for 250ms of latency.
+
+To deal with latency, I simulate, using the kinetic model, the states of the vehicle after the duration
+of the latency, and use these states to be the initial states for the MPC.
